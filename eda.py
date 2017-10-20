@@ -1,8 +1,10 @@
 #!/usr/bin/env python
 
 """
-    gtf-taxi.py
+    format-parade.py
 """
+
+from __future__ import print_function
 
 from rsub import *
 from matplotlib import pyplot as plt
@@ -12,6 +14,7 @@ import numpy as np
 import osmnx as ox
 import pandas as pd
 import geopandas as gpd
+from sklearn.neighbors import KDTree
 
 ox.config(log_file=True, log_console=True, use_cache=True)
 pd.set_option('display.width', 200)
@@ -19,8 +22,8 @@ pd.set_option('display.width', 200)
 # --
 # Helpers
 
-def parse_dublin(bbox):
-    bbox = map(lambda x: float(x.split('=')[1]), bbox.split(';'))
+def parse_dublin(bbox_str):
+    bbox = map(lambda x: float(x.split('=')[1]), bbox_str.split(';'))
     return dict(zip(['west', 'south', 'east', 'north'], bbox))
 
 
@@ -52,84 +55,31 @@ def get_nearest_nodes(G, coords_q):
     node_ids  = np.array(G.nodes())
     graph_coords = np.array([[data['y'], data['x']] for node, data in G.nodes(data=True)])
     
-    graph_coords_c = latlon2cartesian(graph_coords)
-    coords_q_c = latlon2cartesian(coords_q)
+    graph_coords_c = latlon2cartesian_vec(graph_coords)
+    coords_q_c = latlon2cartesian_vec(coords_q)
     
-    print('computing sims', file=sys.stderr)
-    sims = graph_coords_c.dot(coords_q_c.T)
-    print('computing nns', file=sys.stderr)
-    nns  = sims.argmax(axis=0)
-    print('computing dists', file=sys.stderr)
-    dists = haversine_distance_v(graph_coords[nns], coords_q)
-    return node_ids[nns], dists * 1000
-
+    kd_tree = KDTree(graph_coords_c, 2, metric='euclidean')
+    
+    dists, nns = kd_tree.query(coords_q_c)
+    dists = dists.squeeze()
+    
+    return node_ids[nns], np.arcsin(dists.clip(max=1)) * 6371 * 1000
 
 # --
-# Load taxi
 
-def load_taxi(path):
-    return pd.read_csv(path, low_memory=False, usecols=[
-        'pickup_datetime', 'dropoff_datetime', 
-        'pickup_longitude', 'pickup_latitude', 
-        'dropoff_longitude', 'dropoff_latitude',
-    ])
-
-
-paths = [
-    'yellow_tripdata_2011-05.csv',
-    'yellow_tripdata_2011-06.csv',
-]
-
-df = pd.concat(map(load_taxi, paths))
-
-# --
-# Drop invalid locations
-
-bbox = parse_dublin("westlimit=-74.087334; southlimit=40.641833; eastlimit=-73.858681; northlimit=40.884708")
-df = df[(
-    (df.pickup_latitude > bbox['south']) & 
-    (df.pickup_latitude < bbox['north']) & 
-    (df.pickup_longitude < bbox['east']) & 
-    (df.pickup_longitude > bbox['west'])
-)]
-
-# --
-# Clean dates
-
-pickup_datetime = pd.to_datetime(df.pickup_datetime)
-df['date']      = df.pickup_datetime.apply(lambda x: x.split(' ')[0])
-df['dayofweek'] = pickup_datetime.dt.dayofweek
-df['hour']      = pickup_datetime.dt.hour
-df['target']    = df.date == '2011-06-26'
-
-# --
-# Subset times
-
-sub = df[(df.dayofweek == 6) & (df.hour >= 12) & (df.hour <= 13)]
-sub = sub.sort_values('pickup_datetime')
-
-# sub.to_csv('./sub', sep='\t', index=False)
-# sub = pd.read_csv('./sub', sep='\t')
-
-
-# ==============================
-# Graph stuff
-
+df = pd.read_csv('../parade.tsv', sep='\t')
 
 # Smell check -- can we see the parade in raw data?
-
 bbox = parse_dublin('westlimit=-74.023561; southlimit=40.698405; eastlimit=-73.968158; northlimit=40.754962')
 
-pos = sub[sub.target]
-neg = sub[~sub.target]
-
-_ = plt.scatter(pos.pickup_longitude, pos.pickup_latitude, s=1, alpha=0.03)
+_ = plt.scatter(df[df.target].pickup_longitude, df[df.target].pickup_latitude, s=1, alpha=0.03, c='blue')
 _ = plt.xlim(bbox['west'], bbox['east'])
 _ = plt.ylim(bbox['south'], bbox['north'])
 show_plot()
 
-sel = np.random.choice(neg.shape[0], pos.shape[0], replace=False)
-_ = plt.scatter(neg.pickup_longitude.iloc[sel], neg.pickup_latitude.iloc[sel], s=1, alpha=0.03)
+tmp = df[~df.target]
+sel = np.random.choice(tmp.shape[0], df.target.sum(), replace=False)
+_ = plt.scatter(tmp.pickup_longitude.iloc[sel], tmp.pickup_latitude.iloc[sel], s=1, alpha=0.03, c='red')
 _ = plt.xlim(bbox['west'], bbox['east'])
 _ = plt.ylim(bbox['south'], bbox['north'])
 show_plot()
@@ -139,41 +89,40 @@ show_plot()
 # Load street graph
 
 G = ox.graph_from_place('Manhattan Island, New York City, New York, USA', network_type='drive')
-Gp = ox.project_graph(G)
-fig, ax = ox.plot_graph(Gp)
-show_plot()
+graph_coords = np.array([[data['y'], data['x']] for node, data in G.nodes(data=True)])
 
 # --
 # Map each dropoff to nearest neighbor in graph
 
-sub['pickup_nearest_node'], sub['pickup_nearest_dist'] =\
-    get_nearest_nodes(G, np.array(sub[['pickup_latitude', 'pickup_longitude']]))
+df['pickup_nearest_node'], df['pickup_nearest_dist'] =\
+    get_nearest_nodes(G, np.array(df[['pickup_latitude', 'pickup_longitude']]))
 
-sub['dropoff_nearest_node'], sub['dropoff_nearest_dist'] =\
-    get_nearest_nodes(G, np.array(sub[['dropoff_latitude', 'dropoff_longitude']]))
+df['dropoff_nearest_node'], df['dropoff_nearest_dist'] =\
+    get_nearest_nodes(G, np.array(df[['dropoff_latitude', 'dropoff_longitude']]))
 
 
 # Smell test
-i = 300
-ox.get_nearest_node(G, (sub.pickup_latitude.iloc[i], sub.pickup_longitude.iloc[i]), return_dist=True)
-tuple(sub.iloc[i][['pickup_nearest_node', 'pickup_nearest_dist']])
-
+i = np.random.choice(df.shape[0])
+a = ox.get_nearest_node(G, (df.pickup_latitude.iloc[i], df.pickup_longitude.iloc[i]), return_dist=True)
+b = tuple(df.iloc[i][['pickup_nearest_node', 'pickup_nearest_dist']])
+assert a[0] == b[0]
+assert np.abs(a[1] - b[1]) < 1
 
 # --
 # Join data to graph
 
 node_ids = np.array(G.nodes())
-graph_coords = np.array([[data['y'], data['x']] for node, data in G.nodes(data=True)])
 
-neg = sub[~sub.target]
-pos = sub[sub.target]
+neg = df[~df.target]
+pos = df[df.target]
 
 pos_counts = pd.value_counts(np.concatenate([np.array(pos.pickup_nearest_node), np.array(pos.dropoff_nearest_node)]))
 neg_counts = pd.value_counts(np.concatenate([np.array(neg.pickup_nearest_node), np.array(neg.dropoff_nearest_node)]))
 
+nneg = neg.date.unique().shape[0]
 counts = pd.DataFrame({
     "pos" : pos_counts.loc[node_ids],
-    "neg" : neg_counts.loc[node_ids] / 9, # number of other days
+    "neg" : neg_counts.loc[node_ids] / nneg, # number of other days
 }).fillna(0)
 counts['d'] = counts.neg - counts.pos
 counts = counts.loc[node_ids]
@@ -187,11 +136,10 @@ show_plot()
 
 # --
 
-np.save('edges', np.array(G.edges)[:,:2])
-pd.DataFrame(np.array(G.edges)[:,:2]).to_csv('./edges.tsv', sep='\t', index=False, header=False)
-counts[['neg', 'pos']].reset_index().to_csv('./nodes.tsv', sep='\t', index=False)
-np.save('coords', graph_coords)
-np.save('node_ids', node_ids)
+pd.DataFrame(np.array(G.edges)[:,:2]).to_csv('../parade-edges.tsv', sep='\t', index=False, header=False)
+counts.reset_index().to_csv('../parade-nodes.tsv', sep='\t', index=False)
+np.save('../parade-coords', graph_coords)
+
 # # >>
 
 # ind = np.array(pd.Series(node_ids).isin(nodes))

@@ -38,31 +38,25 @@ class SuperVX(object):
         return TGraphVX(sgraph)
     
     def _add_objectives(self, gvx, supernodes, superedges):
-        
-        # Change these functions to change behavior
-        def node_obj(v, sfeats, int_edges):
-           return (
+        # Node objectives
+        values = {}
+        for sid, sfeats in supernodes.items():
+            v = Variable(sfeats.shape[0], name='x')
+            int_edges = np.array(superedges[sid, sid])
+            gvx.SetNodeObjective(sid, (
                 0.5 * sum_squares(v - sfeats) + 
                 self.reg_sparsity * norm1(v) + 
                 self.reg_edge * norm1(v[int_edges[:,0]] - v[int_edges[:,1]])
-            )
-        
-        def edge_obj(values, ext_edges):
-            return (
-                self.reg_edge * norm1(values[sid1][ext_edges[:,0]] - values[sid2][ext_edges[:,1]])
-            )
-        
-        # Node objectives
-        values = {}
-        for sid, sfeats in supernodes.items():            
-            v = Variable(sfeats.shape[0], name='x')
-            gvx.SetNodeObjective(sid, node_obj(v, sfeats, np.array(superedges[sid, sid])))
+            ))
             values[sid] = v
         
         # Edge objectives
         for (sid1, sid2), ext_edges in superedges.items():
             if sid1 != sid2:
-                gvx.SetEdgeObjective(sid1, sid2, edge_obj(values, np.array(superedges[sid1, sid2])))
+                ext_edges = np.array(superedges[sid1, sid2])
+                gvx.SetEdgeObjective(sid1, sid2, (
+                self.reg_edge * norm1(values[sid1][ext_edges[:,0]] - values[sid2][ext_edges[:,1]])
+            ))
         
         return values
     
@@ -122,9 +116,6 @@ class SuperGraph(object):
         return unpacked
 
 
-
-
-
 # --
 # Args
 
@@ -139,16 +130,14 @@ args = parse_args()
 # --
 # IO
 
-edges = pd.read_csv('../edges.tsv', sep='\t', header=None)
+edges = pd.read_csv('../parade-edges.tsv', sep='\t', header=None)
+nodes = pd.read_csv('../parade-nodes.tsv', sep='\t')
+graph_coords = np.load('../parade-coords.npy')
+
 edges = edges[edges[0] != edges[1]]
-
-nodes = pd.read_csv('../nodes.tsv', sep='\t')
-
-
-nodes['d']   = nodes.neg - nodes.pos
 nodes['uid'] = np.arange(nodes.shape[0])
-
 node_lookup = nodes[['index', 'uid']].set_index('index')
+
 
 # Clean
 feats = np.array(nodes.d)
@@ -171,6 +160,12 @@ svx = SuperVX(supergraph.supernodes, supergraph.superedges, reg_sparsity=args.re
 svx.solve(UseADMM=False, Verbose=True)
 fitted = supergraph.unpack(svx.values)
 
-graph_coords = np.load('../coords.npy')
-_ = plt.scatter(graph_coords[:,1], graph_coords[:,0], c=np.sign(fitted) * np.sqrt(np.abs(fitted)), s=5, cmap='seismic')
+# --
+# Plot results
+
+c = np.sign(fitted) * np.sqrt(np.abs(fitted))
+cmax = np.abs(c).max()
+_ = plt.scatter(graph_coords[:,1], graph_coords[:,0], c=c, vmin=-cmax, vmax=cmax + 1, s=5, cmap='seismic')
+_ = plt.title("gamma=%d | lambda=%d" % (args.reg_sparsity, args.reg_edge))
+_ = plt.colorbar()
 show_plot()

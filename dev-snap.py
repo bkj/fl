@@ -28,26 +28,23 @@ def parse_dublin(bbox):
 # --
 # IO
 
-edges = pd.read_csv('./edges.tsv', sep='\t', header=None)
+edges = pd.read_csv('../parade-edges.tsv', sep='\t', header=None)
+nodes = pd.read_csv('../parade-nodes.tsv', sep='\t')
+graph_coords = np.load('../parade-coords.npy')
+
 edges = edges[edges[0] != edges[1]]
 
-nodes = pd.read_csv('./nodes.tsv', sep='\t')
-graph_coords = np.load('./coords.npy')
-
-nodes['d']   = nodes.neg - nodes.pos
 nodes['uid'] = np.arange(nodes.shape[0])
-
 node_lookup = nodes[['index', 'uid']].set_index('index')
 
-# _ = plt.scatter(graph_coords[:,1], graph_coords[:,0], c=np.sign(nodes.d) * np.sqrt(np.abs(nodes.d)), s=5, cmap='seismic')
-# _ = plt.title('raw data')
-# show_plot()
-
+_ = plt.scatter(graph_coords[:,1], graph_coords[:,0], c=np.sign(nodes.d) * np.sqrt(np.abs(nodes.d)), s=5, cmap='seismic')
+_ = plt.title('raw data')
+show_plot()
 
 # --
 # Prep
 
-gamma = 5
+gamma = 10
 lambda_ = 10
 
 # Format data
@@ -77,7 +74,10 @@ prob.solve()
 time.time() - t
 
 XX = np.asarray(XX.value).squeeze()
-ax = plt.scatter(graph_coords[:,1], graph_coords[:,0], c=np.sign(XX) * np.sqrt(np.abs(XX)), s=5, cmap='seismic')
+c = np.sign(XX) * np.sqrt(np.abs(XX))
+_ = plt.scatter(graph_coords[:,1], graph_coords[:,0], c=c, vmin=-np.abs(c).max(), vmax=np.abs(c).max() + 1, s=5, cmap='seismic')
+_ = plt.title("gamma=%d | lambda=%d" % (gamma, lambda_))
+_ = plt.colorbar()
 show_plot()
 
 # --
@@ -161,7 +161,6 @@ for sid1, sid2 in superedges:
     if len(idx1):
         obj = lambda_ * norm1(V[sid1][idx1] - V[sid2][idx2])
         gvx.SetEdgeObjective(sid1, sid2, obj)
-
 
 t = time.time()
 gvx.Solve(UseADMM=True, Verbose=True)
