@@ -8,13 +8,13 @@ require(genlasso)
 # IO
 
 # Load nodes
-nodes = read.csv('./nodes.tsv', sep='\t')
+nodes = read.csv('../nodes.tsv', sep='\t')
 nodes$id = as.numeric(as.factor(nodes$index))
 nodes = nodes[order(nodes$id),]
 rownames(nodes) = NULL
 
 # Load edges
-edges = orig_edges = read.csv('./edges.tsv', sep='\t', header=FALSE)
+edges = orig_edges = read.csv('../edges.tsv', sep='\t', header=FALSE)
 edges = unlist(t(edges), use.names=F)
 edges = edges[1:prod(dim(edges))]
 edges = as.numeric(as.factor(edges))
