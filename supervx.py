@@ -4,22 +4,15 @@
     supervx.py
 """
 
+from __future__ import print_function
+
 import sys
-import argparse
 import numpy as np
-import pandas as pd
-from time import time
 from collections import defaultdict
 
 from snapvx import *
 import networkx as nx
 from community import community_louvain
-
-from rsub import *
-from matplotlib import pyplot as plt
-
-# --
-# SuperVX
 
 class SuperVX(object):
     
@@ -66,15 +59,18 @@ class SuperVX(object):
 
 class SuperGraph(object):
     
-    def __init__(self, edges, feats):
+    def __init__(self, edges, feats, partition=None):
         
         # Partition graph
         G = nx.from_edgelist(edges)
-        partition = community_louvain.best_partition(G)
-        partition = np.array([p[1] for p in sorted(partition.items(), key=lambda x: x[0])])
+        if partition is None:
+            print("SuperGraph: computing partition", file=sys.stderr)
+            partition = community_louvain.best_partition(G)
+            partition = np.array([p[1] for p in sorted(partition.items(), key=lambda x: x[0])])
         
         self.lookup, self.supernodes = self._make_supernodes(feats, partition)
         self.superedges = self._make_superedges(G, partition, self.lookup)
+        self.partition = partition
         
     def _make_supernodes(self, feats, partition):
         lookup = {}
@@ -106,7 +102,7 @@ class SuperGraph(object):
     def unpack(self, values):
         values = dict([(k, np.asarray(v.value).squeeze()) for k,v in values.items()])
         
-        reverse_lookup = [[(i[0], (sk, i[1])) for i in v.items()] for sk,v in supergraph.lookup.items()]
+        reverse_lookup = [[(i[0], (sk, i[1])) for i in v.items()] for sk,v in self.lookup.items()]
         reverse_lookup = dict(reduce(lambda a,b: a + b, reverse_lookup))
         
         unpacked = np.zeros(len(reverse_lookup))
@@ -114,58 +110,3 @@ class SuperGraph(object):
             unpacked[idx] = values[p][int_idx]
         
         return unpacked
-
-
-# --
-# Args
-
-def parse_args():
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--reg-sparsity', type=float, default=5)
-    parser.add_argument('--reg-edge', type=float, default=10)
-    return parser.parse_args()
-
-args = parse_args()
-
-# --
-# IO
-
-edges = pd.read_csv('../parade-edges.tsv', sep='\t', header=None)
-nodes = pd.read_csv('../parade-nodes.tsv', sep='\t')
-graph_coords = np.load('../parade-coords.npy')
-
-edges = edges[edges[0] != edges[1]]
-nodes['uid'] = np.arange(nodes.shape[0])
-node_lookup = nodes[['index', 'uid']].set_index('index')
-
-
-# Clean
-feats = np.array(nodes.d)
-
-# Dedupe edges
-edges = np.hstack([
-    np.array(node_lookup.loc[edges[0]]), 
-    np.array(node_lookup.loc[edges[1]]),
-])
-sel = edges[:,0] >= edges[:,1]
-edges[sel] = edges[sel,::-1]
-edges = edges[pd.DataFrame(edges).drop_duplicates().index]
-
-
-# --
-# Run
-
-supergraph = SuperGraph(edges, feats)
-svx = SuperVX(supergraph.supernodes, supergraph.superedges, reg_sparsity=args.reg_sparsity, reg_edge=args.reg_edge)
-svx.solve(UseADMM=False, Verbose=True)
-fitted = supergraph.unpack(svx.values)
-
-# --
-# Plot results
-
-c = np.sign(fitted) * np.sqrt(np.abs(fitted))
-cmax = np.abs(c).max()
-_ = plt.scatter(graph_coords[:,1], graph_coords[:,0], c=c, vmin=-cmax, vmax=cmax + 1, s=5, cmap='seismic')
-_ = plt.title("gamma=%d | lambda=%d" % (args.reg_sparsity, args.reg_edge))
-_ = plt.colorbar()
-show_plot()

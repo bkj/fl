@@ -5,14 +5,13 @@
 """
 
 import sys
-# sys.path.append('/home/bjohnson/software/snap/snap')
-# sys.path.append('/home/bjohnson/software/snap/snapvx')
 
 from time import time
 import numpy as np
 import pandas as pd
-from snapvx import *
+
 import snap
+from snapvx import *
 
 from rsub import *
 from matplotlib import pyplot as plt
@@ -33,7 +32,6 @@ nodes = pd.read_csv('../parade-nodes.tsv', sep='\t')
 graph_coords = np.load('../parade-coords.npy')
 
 edges = edges[edges[0] != edges[1]]
-
 nodes['uid'] = np.arange(nodes.shape[0])
 node_lookup = nodes[['index', 'uid']].set_index('index')
 
@@ -44,7 +42,7 @@ show_plot()
 # --
 # Prep
 
-gamma = 10
+gamma = 5
 lambda_ = 10
 
 # Format data

@@ -35,44 +35,6 @@ def filter_dublin(bbox_str, lat, lon):
         (lon > bbox['west'])
     )
 
-
-def latlon2cartesian_vec(latlon, d=1):
-    latlon = np.radians(latlon)
-    return np.array([
-        d * np.cos(latlon[:,0]) * np.cos(-latlon[:,1]), # x
-        d * np.cos(latlon[:,0]) * np.sin(-latlon[:,1]), # y
-        d * np.sin(latlon[:,0]),                        # z
-    ]).T
-
-
-def haversine_distance_vec(v1, v2, radius=6371):
-    v1, v2 = np.radians(v1), np.radians(v2)
-    
-    latitude1, longitude1 = v1[:,0],v1[:,1]
-    latitude2, longitude2 = v2[:,0],v2[:,1]
-    
-    dlongitude = longitude2 - longitude1 
-    dlatitude = latitude2 - latitude1 
-    a = np.sin(dlatitude/2) ** 2 + np.cos(latitude1) * np.cos(latitude2) * np.sin(dlongitude/2)**2
-    c = 2 * np.arcsin(np.sqrt(a)) 
-    km = radius * c
-    return km
-
-def get_nearest_nodes(G, coords_q):
-    # !! Should maybe be worried about underflow
-    node_ids  = np.array(G.nodes())
-    graph_coords = np.array([[data['y'], data['x']] for node, data in G.nodes(data=True)])
-    
-    graph_coords_c = latlon2cartesian_vec(graph_coords)
-    coords_q_c = latlon2cartesian_vec(coords_q)
-    
-    kd_tree = KDTree(graph_coords_c, 2, metric='euclidean')
-    
-    dists, nns = kd_tree.query(coords_q_c)
-    dists = dists.squeeze()
-    
-    return node_ids[nns], np.arcsin(dists.clip(max=1)) * 6371 * 1000
-
 # --
 # Load taxi
 
